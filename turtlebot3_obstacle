@@ -1,0 +1,195 @@
+#!/usr/bin/env python
+#################################################################################
+# Copyright 2018 ROBOTIS CO., LTD.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#################################################################################
+
+# Authors: Gilbert #
+
+import rospy
+import math
+from sensor_msgs.msg import LaserScan
+from geometry_msgs.msg import Twist
+
+LINEAR_VEL = 0.05
+TURN_VEL = 0.5
+STOP_DISTANCE = 0.2
+LIDAR_ERROR = 0.05
+SAFE_STOP_DISTANCE = STOP_DISTANCE + LIDAR_ERROR
+OBSTACLE_DISTANCE = 0.5
+COLLISION_DISTANCE = 0.15
+
+
+class Obstacle():
+    def __init__(self):
+        # Initialize the publisher for the Twist message to control the robot
+        self._cmd_pub = rospy.Publisher('cmd_vel', Twist, queue_size=1)
+        # Call the obstacle avoidance function
+        self.obstacle()
+
+    def get_scan(self, samples):
+        # Wait for a LaserScan message from the lidar sensor
+        scan = rospy.wait_for_message('scan', LaserScan)
+        # Filter the scan to only include a certain number of samples
+        samples_view = min(samples, len(scan.ranges))
+        scan_filter = []
+        
+        if samples_view == 1:
+            scan_filter.append(scan.ranges[0])
+        else:
+            left_lidar_samples_ranges = -(samples_view//2 + samples_view % 2)
+            right_lidar_samples_ranges = samples_view//2
+            left_lidar_samples = scan.ranges[left_lidar_samples_ranges:]
+            right_lidar_samples = scan.ranges[:right_lidar_samples_ranges]
+            scan_filter.extend(left_lidar_samples + right_lidar_samples)
+        
+        for i in range(samples_view):
+            # Handle Inf values and NaN values in the scan data
+            if scan_filter[i] == 0 or math.isnan(scan_filter[i]) or scan_filter[i] == float('inf'):
+                scan_filter[i] = 3.5
+        
+        return scan_filter
+
+
+    def turn(self, twist, left, right):
+        # Turn the robot towards the direction with more free space
+        if sum(left) > sum(right):
+            twist.angular.z = -TURN_VEL
+        else:
+            twist.angular.z = TURN_VEL
+        
+        self._cmd_pub.publish(twist)
+        return
+
+    def is_dead_end(self, left, right):
+        # Check if the robot is in a dead end
+        return min(left) < SAFE_STOP_DISTANCE and min(right) < SAFE_STOP_DISTANCE
+        
+
+    def go_forward(self, twist):
+        # Move the robot forward 
+        twist.linear.x = LINEAR_VEL
+        twist.angular.z = 0
+        self._cmd_pub.publish(twist)
+        return
+    
+    def go_forward_slow(self, twist):
+        # Move the robot forward slow
+        twist.linear.x = LINEAR_VEL/5
+        self._cmd_pub.publish(twist)
+        return
+    
+    def go_back_wall(self, twist):
+        # scan again getting 180 degrees
+        lidar_distances = self.get_scan(180)
+        #find wall distance left and right
+        left = lidar_distances[0:30]
+        right = lidar_distances[150:180]
+        #log for debugging
+        rospy.loginfo('Going back via wall')
+        #go back until both left and right are safe
+        while (min(left) < SAFE_STOP_DISTANCE and min(right) < SAFE_STOP_DISTANCE):
+            self.go_back(twist)
+            lidar_distances = self.get_scan(180)
+            left = lidar_distances[0:30]
+            right = lidar_distances[150:180]
+        #turn 90 degrees left or right
+        self.turn(twist, left, right)
+        rospy.sleep(1)
+        twist.angular.z = 0
+        return
+
+    def go_back(self, twist):
+        # Move the robot forward 
+        #log for debugging
+        rospy.loginfo('Going back')
+        twist.linear.x = -LINEAR_VEL
+        self._cmd_pub.publish(twist)
+        return
+    
+    def avoid(self, angle, twist, left, right):
+
+        while angle > 0:
+            self.go_forward_slow(twist)
+            self.turn(twist, left, right)
+            angle /= 2
+
+        self.go_forward(twist)
+        return
+        #sleep ? 
+    
+    def collision(self):
+        lidar_distances = self.get_scan(360)
+        return min(lidar_distances) < COLLISION_DISTANCE
+
+    #def rgb_sensor(self):
+
+    #map behind robot
+    #def map(self):
+    
+
+    def obstacle(self):
+        twist = Twist()
+        collision_count = 0
+
+        while not rospy.is_shutdown():
+            lidar_distances = self.get_scan(30)
+            min_distance = min(lidar_distances)
+            left = lidar_distances[0:15]
+            right = lidar_distances[15:30]
+            #min distance index
+            min_index = lidar_distances.index(min_distance)
+            #angle of min distance
+            if min_index < 15:
+                angle = (15 - min_index)
+            else:
+                angle = (min_index - 15)
+            
+            #log for debugging
+            rospy.loginfo('Distance: %f', min_distance)
+
+            if self.collision():
+                collision_count += 1
+                #log for debugging
+                rospy.loginfo('Collision count: %f', collision_count)
+
+
+            if min_distance < SAFE_STOP_DISTANCE:
+                if self.is_dead_end(left,right):   # Do something if it's a dead end
+                    #log for debugging
+                    rospy.loginfo('Dead end detected')
+                    self.go_back_wall(twist) #track wall back and turn 90 degrees
+                else:
+                    self.turn(twist, left, right) #turn 90 degrees left or right 
+                    rospy.loginfo('Turning')
+                    twist.angular.z = 0
+            
+            elif min_distance < OBSTACLE_DISTANCE:
+                #log for debugging
+                rospy.loginfo('Obstacle detected')
+                self.avoid(angle, twist, left, right)
+            else:
+                self.go_forward(twist)  # Go forward if no obstacle detected
+
+                
+
+def main():
+    rospy.init_node('turtlebot3_obstacle')
+    try:
+        obstacle = Obstacle()
+    except rospy.ROSInterruptException:
+        pass
+
+if __name__ == '__main__':
+    main()
