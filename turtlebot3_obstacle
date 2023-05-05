@@ -56,8 +56,13 @@ class Obstacle():
         
         for i in range(samples_view):
             # Handle Inf values and NaN values in the scan data
-            if scan_filter[i] == 0 or math.isnan(scan_filter[i]) or scan_filter[i] == float('inf'):
-                scan_filter[i] = 3.5
+            for i in range(samples_view):
+                if scan_filter[i] == 0:
+                    scan_filter[i] = 3.5
+                elif scan_filter[i] == float('Inf'):
+                    scan_filter[i] = 3.5
+                elif math.isnan(scan_filter[i]):
+                    scan_filter[i] = 0
         
         return scan_filter
 
