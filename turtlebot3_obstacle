@@ -77,18 +77,14 @@ class Obstacle():
         return min(left) < SAFE_STOP_DISTANCE and min(right) < SAFE_STOP_DISTANCE
         
 
-    def go_forward(self, twist):
-        # Move the robot forward 
-        twist.linear.x = LINEAR_VEL
+    def drive(self, twist,skalar):
+        # Move the robot forward or backwards depending on the skalar
+        twist.linear.x = skalar*LINEAR_VEL
         twist.angular.z = 0
         self._cmd_pub.publish(twist)
         return
     
-    def go_forward_slow(self, twist):
-        # Move the robot forward slow
-        twist.linear.x = LINEAR_VEL/5
-        self._cmd_pub.publish(twist)
-        return
+
     
     def go_back_wall(self, twist):
         # scan again getting 180 degrees
@@ -100,7 +96,7 @@ class Obstacle():
         rospy.loginfo('Going back via wall')
         #go back until both left and right are safe
         while (min(left) < SAFE_STOP_DISTANCE and min(right) < SAFE_STOP_DISTANCE):
-            self.go_back(twist)
+            self.drive(twist,-1)
             lidar_distances = self.get_scan(180)
             left = lidar_distances[0:30]
             right = lidar_distances[150:180]
@@ -110,22 +106,16 @@ class Obstacle():
         twist.angular.z = 0
         return
 
-    def go_back(self, twist):
-        # Move the robot forward 
-        #log for debugging
-        rospy.loginfo('Going back')
-        twist.linear.x = -LINEAR_VEL
-        self._cmd_pub.publish(twist)
-        return
+
     
     def avoid(self, angle, twist, left, right):
 
         while angle > 0:
-            self.go_forward_slow(twist)
+            self.drive(twist,0.5)
             self.turn(twist, left, right)
             angle /= 2
 
-        self.go_forward(twist)
+        self.drive(twist,1)
         return
         #sleep ? 
     
@@ -180,7 +170,7 @@ class Obstacle():
                 rospy.loginfo('Obstacle detected')
                 self.avoid(angle, twist, left, right)
             else:
-                self.go_forward(twist)  # Go forward if no obstacle detected
+                self.drive(twist,1)  # Go forward if no obstacle detected
 
                 
 
