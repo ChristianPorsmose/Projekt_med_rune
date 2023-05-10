@@ -16,19 +16,27 @@
 #################################################################################
 
 # Authors: Gilbert #
-
+#import smbus2 as smbus
+import time
 import rospy
 import math
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
 
-LINEAR_VEL = 0.05
-TURN_VEL = 0.5
+#bus = smbus.SMBus(1)
+
+#bus.write_byte_data(0x44, 0x01, 0x05)
+
+time.sleep(1)
+
+LINEAR_VEL = 0.22
+TURN_VEL = 2.84
 STOP_DISTANCE = 0.2
 LIDAR_ERROR = 0.05
 SAFE_STOP_DISTANCE = STOP_DISTANCE + LIDAR_ERROR
-OBSTACLE_DISTANCE = 0.5
-COLLISION_DISTANCE = 0.15
+OBSTACLE_DISTANCE = 0.45
+
+
 
 
 class Obstacle():
@@ -38,58 +46,61 @@ class Obstacle():
         # Call the obstacle avoidance function
         self.obstacle()
 
-    def get_scan(self, samples):
-        # Wait for a LaserScan message from the lidar sensor
+    def get_scan(self,angle):
         scan = rospy.wait_for_message('scan', LaserScan)
-        # Filter the scan to only include a certain number of samples
-        samples_view = min(samples, len(scan.ranges))
         scan_filter = []
+       
+        samples = len(scan.ranges)  # The number of samples is defined in 
+                                    # turtlebot3_<model>.gazebo.xacro file,
+                                    # the default is 360.
+        samples_view = angle           # 1 <= samples_view <= samples
         
-        if samples_view == 1:
+        if samples_view > samples:
+            samples_view = samples
+
+        if samples_view is 1:
             scan_filter.append(scan.ranges[0])
+
         else:
             left_lidar_samples_ranges = -(samples_view//2 + samples_view % 2)
             right_lidar_samples_ranges = samples_view//2
+            
             left_lidar_samples = scan.ranges[left_lidar_samples_ranges:]
             right_lidar_samples = scan.ranges[:right_lidar_samples_ranges]
             scan_filter.extend(left_lidar_samples + right_lidar_samples)
-        
+
         for i in range(samples_view):
-            # Handle Inf values and NaN values in the scan data
-            for i in range(samples_view):
-                if scan_filter[i] == 0:
-                    scan_filter[i] = 3.5
-                elif scan_filter[i] == float('Inf'):
-                    scan_filter[i] = 3.5
-                elif math.isnan(scan_filter[i]):
-                    scan_filter[i] = 0
+            if scan_filter[i] == float('Inf'):
+                scan_filter[i] = 3.5
+            elif math.isnan(scan_filter[i]):
+                scan_filter[i] = 0
         
         return scan_filter
 
-
-    def turn(self, twist, left, right):
+    def turn(self, twist, left, right, skalar):
         # Turn the robot towards the direction with more free space
         if sum(left) > sum(right):
-            twist.angular.z = -TURN_VEL
+            twist.angular.z = -1 * skalar * TURN_VEL
         else:
-            twist.angular.z = TURN_VEL
+            twist.angular.z = skalar * TURN_VEL
         
         self._cmd_pub.publish(twist)
+        #log for debugging
+        #rospy.loginfo('Turning' + str(twist.angular.z))
         return
 
     def is_dead_end(self, left, right):
         # Check if the robot is in a dead end
         return min(left) < SAFE_STOP_DISTANCE and min(right) < SAFE_STOP_DISTANCE
-        
 
     def drive(self, twist,skalar):
         # Move the robot forward or backwards depending on the skalar
         twist.linear.x = skalar*LINEAR_VEL
-        twist.angular.z = 0
+        #twist.angular.z = 0
         self._cmd_pub.publish(twist)
+        #log for debugging
+        #rospy.loginfo('Driving' + str(twist.linear.x))
         return
-    
-
     
     def go_back_wall(self, twist):
         # scan again getting 180 degrees
@@ -98,7 +109,7 @@ class Obstacle():
         left = lidar_distances[0:30]
         right = lidar_distances[150:180]
         #log for debugging
-        rospy.loginfo('Going back via wall')
+        #rospy.loginfo('Going back via wall')
         #go back until both left and right are safe
         while (min(left) < SAFE_STOP_DISTANCE and min(right) < SAFE_STOP_DISTANCE):
             self.drive(twist,-1)
@@ -106,39 +117,68 @@ class Obstacle():
             left = lidar_distances[0:30]
             right = lidar_distances[150:180]
         #turn 90 degrees left or right
-        self.turn(twist, left, right)
+        self.turn(twist, left, right,1)
         rospy.sleep(1)
         twist.angular.z = 0
+        self._cmd_pub.publish(twist)
         return
-
-
     
     def avoid(self, angle, twist, left, right):
+        turn_scale = 0.7
+        drive_scale = 0.6
 
-        while angle > 0:
-            self.drive(twist,0.5)
-            self.turn(twist, left, right)
-            angle /= 2
-
-        self.drive(twist,1)
+        while angle > 0.5:
+            self.drive(twist,drive_scale)
+            self.turn(twist, left, right, turn_scale)
+            angle /= 3
+            drive_scale -= 0.1
+            turn_scale += 0.1
+            rospy.sleep(0.1)
+        
+        self.turn(twist, left, right, 0)
         return
         #sleep ? 
     
     def collision(self):
         lidar_distances = self.get_scan(360)
-        return min(lidar_distances) < COLLISION_DISTANCE
+        middle = lidar_distances[0:30]
+        otherwise = lidar_distances[30:360]
+        if min(middle) <= 0.04:
+            return True
+        elif min(otherwise) <= 0.05:
+            return True
+        else:
+            return False
 
-    #def rgb_sensor(self):
+    def getAndUpdateColour(self):
+        data = bus.read_i2c_block_data(0x44, 0x09, 6) #Selects the right registers
+        green = data[1] + data[0]/256 # Calculates the levels of each color [0, 255]
+        red = data[3] + data[2]/256
+        blue = data[5] + data[4]/256
+        
+        # Determines the color based on which has the higher value
+        color = ""
+        if green > red and green > blue: 
+            color = "Green"
+        elif blue > red:
+            color = "Blue"
+        else:
+            color = "Red"
+        return color
 
     #map behind robot
     #def map(self):
-    
 
     def obstacle(self):
         twist = Twist()
         collision_count = 0
+        victim_count = 0
+        speed_updates = 0
+        speed_accummulation = 0
+        average_linear_vel = 0
+        endtime = time.time() + 60
 
-        while not rospy.is_shutdown():
+        while time.time() < endtime:
             lidar_distances = self.get_scan(30)
             min_distance = min(lidar_distances)
             left = lidar_distances[0:15]
@@ -150,34 +190,69 @@ class Obstacle():
                 angle = (15 - min_index)
             else:
                 angle = (min_index - 15)
+
             
             #log for debugging
             rospy.loginfo('Distance: %f', min_distance)
+            rospy.loginfo('Angle: %f', angle)
 
             if self.collision():
                 collision_count += 1
                 #log for debugging
-                rospy.loginfo('Collision count: %f', collision_count)
+                #rospy.loginfo('Collision count: %f', collision_count)
 
 
             if min_distance < SAFE_STOP_DISTANCE:
+                self.drive(twist,0)
+                speed_accummulation += 0.5 * LINEAR_VEL
                 if self.is_dead_end(left,right):   # Do something if it's a dead end
                     #log for debugging
-                    rospy.loginfo('Dead end detected')
+                    #rospy.loginfo('Dead end detected')
                     self.go_back_wall(twist) #track wall back and turn 90 degrees
                 else:
-                    self.turn(twist, left, right) #turn 90 degrees left or right 
-                    rospy.loginfo('Turning')
+                    self.turn(twist, left, right, 1) #turn 90 degrees left or right 
+                    #rospy.loginfo('Turning')
                     twist.angular.z = 0
             
             elif min_distance < OBSTACLE_DISTANCE:
                 #log for debugging
-                rospy.loginfo('Obstacle detected')
-                self.avoid(angle, twist, left, right)
-            else:
-                self.drive(twist,1)  # Go forward if no obstacle detected
+                #rospy.loginfo('Obstacle detected')
 
-                
+                # Check if the obstacle is a victim
+                #while self.getAndUpdateColour() == "Red":
+                    # Drive forward until the robot is close enough to the victim
+                    #self.drive(twist,1)
+                    #lidar_distances = self.get_scan(30)
+                    #min_distance = min(lidar_distances)
+                    #if min_distance < SAFE_STOP_DISTANCE:
+                        #self.drive(twist,0)
+                        #log for debugging
+                        #rospy.loginfo('Victim has been found!')
+                        #victim_count += 1
+                        #rospy.sleep(1)
+                        #self.turn(twist, left, right, 1) #turn 90 degrees left or right 
+                        #rospy.loginfo('Turning')
+                        #twist.angular.z = 0
+                        #publish twist
+                        #self._cmd_pub.publish(twist)
+                        
+                self.avoid(angle, twist, left, right)
+                speed_accummulation += 0.5 * LINEAR_VEL
+ 
+            else:
+                self.drive(twist,1) 
+                speed_accummulation += LINEAR_VEL
+
+            speed_updates += 1
+            rospy.sleep(0.1)
+            
+        
+        average_linear_vel = speed_accummulation/speed_updates
+        rospy.loginfo('Average linear velocity: %f', average_linear_vel)
+        rospy.loginfo('Number of victims found: %f', victim_count)
+        rospy.loginfo('Number of collisions: %f', collision_count)
+            
+        
 
 def main():
     rospy.init_node('turtlebot3_obstacle')
