@@ -16,16 +16,16 @@
 #################################################################################
 
 # Authors: Gilbert #
-import smbus as smbus
+#import smbus as smbus
 import time
 import rospy
 import math
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
 
-bus = smbus.SMBus(1)
+#bus = smbus.SMBus(1)
 
-bus.write_byte_data(0x44, 0x01, 0x05)
+#bus.write_byte_data(0x44, 0x01, 0x05)
 
 time.sleep(1)
 
@@ -34,12 +34,16 @@ TURN_VEL = 2.84
 STOP_DISTANCE = 0.2
 LIDAR_ERROR = 0.05
 SAFE_STOP_DISTANCE = STOP_DISTANCE + LIDAR_ERROR
-OBSTACLE_DISTANCE = 0.35
+OBSTACLE_DISTANCE = 0.40
+
+speed_accumulation = 0
 
 
 
 
 class Obstacle():
+
+
     def __init__(self):
         # Initialize the publisher for the Twist message to control the robot
         self._cmd_pub = rospy.Publisher('cmd_vel', Twist, queue_size=1)
@@ -100,6 +104,10 @@ class Obstacle():
         self._cmd_pub.publish(twist)
         #log for debugging
         rospy.loginfo('Driving' + str(twist.linear.x))
+
+        #for data collection
+        global speed_accumulation
+        speed_accumulation += twist.linear.x
         return
     
     def turn_until_free(self, twist, min_distance, left, right):
@@ -125,33 +133,45 @@ class Obstacle():
         right = lidar_distances[150:180]
         #log for debugging
         #rospy.loginfo('Going back via wall')
-        #go back until both left and right are safe
-        while (min(left) < SAFE_STOP_DISTANCE and min(right) < SAFE_STOP_DISTANCE):
+
+        #go back until both left or right are free
+        while self.is_dead_end(left,right):
             self.drive(twist,-1)
             lidar_distances = self.get_scan(180)
             left = lidar_distances[0:30]
             right = lidar_distances[150:180]
             rospy.sleep(0.1)
+
+            #if you hit something, stop
+            if self.collision():
+                break
+
         #turn 90 degrees left or right
         self.drive(twist,0)
-        self.turn(twist, left, right,1)
-        rospy.sleep(1)
-        twist.angular.z = 0
-        twist.linear.x = 0
-        self._cmd_pub.publish(twist)
+        self.turn(twist,left,right,1)
+        #sleep
+        rospy.sleep(0.1)
+        #stop turning
+        self.turn(twist,left,right,0)
         return
     
     def avoid(self, angle, twist, left, right):
-        turn_scale = 0.7
-        drive_scale = 0.6
+        turn_scale = 0.3
+        drive_scale = 0.8
 
         while angle > 0.5:
             self.drive(twist,drive_scale)
             self.turn(twist, left, right, turn_scale)
-            angle /= 3
-            drive_scale -= 0.1
+            angle /= 2
+            drive_scale -= 0.2
             turn_scale += 0.1
             rospy.sleep(0.1)
+
+            if turn_scale > 1:
+                turn_scale = 1
+            
+            if drive_scale < 0:
+                drive_scale = 0
         
         self.turn(twist, left, right, 0)
         return
@@ -192,15 +212,14 @@ class Obstacle():
         collision_count = 0
         victim_count = 0
         speed_updates = 0
-        speed_accummulation = 0
         average_linear_vel = 0
         endtime = time.time() + 60
 
         while time.time() < endtime:
-            lidar_distances = self.get_scan(30)
+            lidar_distances = self.get_scan(26)
             min_distance = min(lidar_distances)
-            left = lidar_distances[0:15]
-            right = lidar_distances[15:30]
+            left = lidar_distances[0:13]
+            right = lidar_distances[13:26]
             #min distance index
             min_index = lidar_distances.index(min_distance)
             #angle of min distance
@@ -215,8 +234,8 @@ class Obstacle():
                 rospy.loginfo('Victim found')
                 #log for debugging
                 self.drive(twist,0)
-                self.turn(twist,left,right,1)
-                time.sleep(2)
+            #    self.turn(twist,left,right,1)
+                time.sleep(1)
                 self.drive(twist,1)
 
             #log for debugging
@@ -231,31 +250,25 @@ class Obstacle():
 
             if min_distance < SAFE_STOP_DISTANCE:
                 self.drive(twist,0)
-                speed_accummulation += 0.5 * LINEAR_VEL
                 if self.is_dead_end(left,right):   # Do something if it's a dead end
                     #log for debugging
-                    #rospy.loginfo('Dead end detected')
-                    self.turn_until_free(twist,min_distance, left, right) #track wall back and turn 90 degrees
+                    rospy.loginfo('Dead end detected')
+                    self.go_back_wall(twist) #track wall back and turn 90 degrees
                 else:
-                    self.turn(twist, left, right, 1) #turn 90 degrees left or right 
-                    #rospy.loginfo('Turning')
-                    twist.angular.z = 0
-                    self._cmd_pub.publish(twist)
+                    self.turn_until_free(twist, min_distance, left, right) #turn 90 degrees left or right 
+                
             
             elif min_distance < OBSTACLE_DISTANCE:
                 self.avoid(angle, twist, left, right)
-                speed_accummulation += 0.5 * LINEAR_VEL
  
             else:
-
                 self.drive(twist,1) 
-                speed_accummulation += LINEAR_VEL
 
             speed_updates += 1
             rospy.sleep(0.1)
-            
         
-        average_linear_vel = speed_accummulation/speed_updates
+        
+        average_linear_vel = speed_accumulation/speed_updates
         rospy.loginfo('Average linear velocity: %f', average_linear_vel)
         rospy.loginfo('Number of victims found: %f', victim_count)
         rospy.loginfo('Number of collisions: %f', collision_count)
