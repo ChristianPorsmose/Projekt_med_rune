@@ -16,16 +16,16 @@
 #################################################################################
 
 # Authors: Gilbert #
-#import smbus as smbus
+import smbus as smbus
 import time
 import rospy
 import math
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
 
-#bus = smbus.SMBus(1)
+bus = smbus.SMBus(1)
 
-#bus.write_byte_data(0x44, 0x01, 0x05)
+bus.write_byte_data(0x44, 0x01, 0x05)
 
 time.sleep(1)
 
