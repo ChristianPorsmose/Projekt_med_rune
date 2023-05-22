@@ -125,15 +125,7 @@ class Obstacle():
         self.drive(twist,1)
         return    
     
-    def go_back_wall(self, twist):
-        # scan again getting 180 degrees
-        lidar_distances = self.get_scan(180)
-        #find wall distance left and right
-        left = lidar_distances[0:30]
-        right = lidar_distances[150:180]
-        #log for debugging
-        #rospy.loginfo('Going back via wall')
-
+    def go_back_wall(self, twist, left, right):
         #go back until both left or right are free
         while self.is_dead_end(left,right):
             self.drive(twist,-1)
@@ -250,10 +242,16 @@ class Obstacle():
 
             if min_distance < SAFE_STOP_DISTANCE:
                 self.drive(twist,0)
-                if self.is_dead_end(left,right):   # Do something if it's a dead end
+                lidar_distances = self.get_scan(180)
+                min_distance = min(lidar_distances)
+                lidar_distances = self.get_scan(180)
+                left_wall = lidar_distances[0:30]
+                right_wall = lidar_distances[150:180]
+                
+                if self.is_dead_end(left_wall,right_wall):   # Do something if it's a dead end
                     #log for debugging
                     rospy.loginfo('Dead end detected')
-                    self.go_back_wall(twist) #track wall back and turn 90 degrees
+                    self.go_back_wall(twist, left_wall, right_wall) #track wall back and turn 90 degrees
                 else:
                     self.turn_until_free(twist, min_distance, left, right) #turn 90 degrees left or right 
                 
