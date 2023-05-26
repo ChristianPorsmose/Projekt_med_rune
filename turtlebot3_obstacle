@@ -37,6 +37,7 @@ SAFE_STOP_DISTANCE = STOP_DISTANCE + LIDAR_ERROR
 OBSTACLE_DISTANCE = 0.40
 
 speed_accumulation = 0
+speed_updates = 0
 
 
 
@@ -108,6 +109,8 @@ class Obstacle():
         #for data collection
         global speed_accumulation
         speed_accumulation += twist.linear.x
+        global speed_updates
+        speed_updates += 1
         return
     
     def turn_until_free(self, twist, min_distance, left, right):
@@ -132,7 +135,7 @@ class Obstacle():
             lidar_distances = self.get_scan(180)
             left = lidar_distances[0:30]
             right = lidar_distances[150:180]
-            rospy.sleep(0.1)
+            rospy.sleep(0.2)
 
             #if you hit something, stop
             if self.collision():
@@ -148,8 +151,13 @@ class Obstacle():
         return
     
     def avoid(self, angle, twist, left, right):
-        turn_scale = 0.3
-        drive_scale = 0.8
+        #de her skal testes
+        if angle < 6:
+            turn_scale = 0.7
+            drive_scale = 0.6
+        else:
+            turn_scale = 0.4
+            drive_scale = 0.8
 
         while angle > 0.5:
             self.drive(twist,drive_scale)
@@ -157,7 +165,7 @@ class Obstacle():
             angle /= 2
             drive_scale -= 0.2
             turn_scale += 0.1
-            rospy.sleep(0.1)
+            rospy.sleep(0.3)
 
             if turn_scale > 1:
                 turn_scale = 1
@@ -203,9 +211,8 @@ class Obstacle():
         twist = Twist()
         collision_count = 0
         victim_count = 0
-        speed_updates = 0
         average_linear_vel = 0
-        endtime = time.time() + 60
+        endtime = time.time() + 120
 
         while time.time() < endtime:
             lidar_distances = self.get_scan(26)
@@ -262,7 +269,6 @@ class Obstacle():
             else:
                 self.drive(twist,1) 
 
-            speed_updates += 1
             rospy.sleep(0.1)
         
         
