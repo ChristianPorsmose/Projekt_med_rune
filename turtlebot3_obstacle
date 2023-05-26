@@ -78,7 +78,9 @@ class Obstacle():
             if scan_filter[i] == float('Inf'):
                 scan_filter[i] = 3.5
             elif math.isnan(scan_filter[i]):
-                scan_filter[i] = 0
+                scan_filter[i] = 3.5
+            elif scan_filter[i] == 0:
+                scan_filter[i] = 3.5
         
         return scan_filter
 
@@ -215,17 +217,17 @@ class Obstacle():
         endtime = time.time() + 120
 
         while time.time() < endtime:
-            lidar_distances = self.get_scan(26)
+            lidar_distances = self.get_scan(40)
             min_distance = min(lidar_distances)
-            left = lidar_distances[0:13]
-            right = lidar_distances[13:26]
+            left = lidar_distances[0:20]
+            right = lidar_distances[20:40]
             #min distance index
             min_index = lidar_distances.index(min_distance)
             #angle of min distance
-            if min_index < 15:
-                angle = (15 - min_index)
+            if min_index < 20:
+                angle = (20 - min_index)
             else:
-                angle = (min_index - 15)
+                angle = (min_index - 20)
 
             if self.getAndUpdateColour() == "Red":
                 victim_count += 1
@@ -268,8 +270,7 @@ class Obstacle():
  
             else:
                 self.drive(twist,1) 
-
-            rospy.sleep(0.1)
+                rospy.sleep(0.1)
         
         
         average_linear_vel = speed_accumulation/speed_updates
