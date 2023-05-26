@@ -51,21 +51,24 @@ class Obstacle():
         # Call the obstacle avoidance function
         self.obstacle()
 
-    def get_scan(self,angle):
+    def get_scan(self, angle):
         scan = rospy.wait_for_message('scan', LaserScan)
         scan_filter = []
        
         samples = len(scan.ranges)  # The number of samples is defined in 
                                     # turtlebot3_<model>.gazebo.xacro file,
                                     # the default is 360.
-        samples_view = angle           # 1 <= samples_view <= samples
+        samples_view = angle            # 1 <= samples_view <= samples
         
+        # Making sure that the angle is >= 360, angle is set at the max val (360)
         if samples_view > samples:
             samples_view = samples
 
+        # if we only need one value, we do not need to filter it
         if samples_view is 1:
             scan_filter.append(scan.ranges[0])
 
+        # Otherwise filter the values so the middle of the returned array = angle/2
         else:
             left_lidar_samples_ranges = -(samples_view//2 + samples_view % 2)
             right_lidar_samples_ranges = samples_view//2
@@ -73,15 +76,15 @@ class Obstacle():
             left_lidar_samples = scan.ranges[left_lidar_samples_ranges:]
             right_lidar_samples = scan.ranges[:right_lidar_samples_ranges]
             scan_filter.extend(left_lidar_samples + right_lidar_samples)
-
-        for i in range(samples_view):
+        
+        # Filtering all values to eliminate faulty scans.
+        for i in range(samples_view): 
+            if scan_filter[i] == 0.0:
+                scan_filter[i] = 3.5
             if scan_filter[i] == float('Inf'):
                 scan_filter[i] = 3.5
             elif math.isnan(scan_filter[i]):
-                scan_filter[i] = 3.5
-            elif scan_filter[i] == 0:
-                scan_filter[i] = 3.5
-        
+                scan_filter[i] = 0.01
         return scan_filter
 
     def turn(self, twist, left, right, skalar):
