@@ -60,15 +60,15 @@ class Obstacle():
                                     # the default is 360.
         samples_view = angle            # 1 <= samples_view <= samples
         
-        # Making sure that the angle is >= 360, angle is set at the max val (360)
+        
         if samples_view > samples:
             samples_view = samples
 
-        # if we only need one value, we do not need to filter it
+        
         if samples_view is 1:
             scan_filter.append(scan.ranges[0])
 
-        # Otherwise filter the values so the middle of the returned array = angle/2
+        
         else:
             left_lidar_samples_ranges = -(samples_view//2 + samples_view % 2)
             right_lidar_samples_ranges = samples_view//2
@@ -77,7 +77,7 @@ class Obstacle():
             right_lidar_samples = scan.ranges[:right_lidar_samples_ranges]
             scan_filter.extend(left_lidar_samples + right_lidar_samples)
         
-        # Filtering all values to eliminate faulty scans.
+        # Filtering all values
         for i in range(samples_view): 
             if scan_filter[i] == 0.0:
                 scan_filter[i] = 3.5
