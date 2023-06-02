@@ -84,7 +84,7 @@ class Obstacle():
             if scan_filter[i] == float('Inf'):
                 scan_filter[i] = 3.5
             elif math.isnan(scan_filter[i]):
-                scan_filter[i] = 0.01
+                scan_filter[i] = 3.5
         return scan_filter
 
     def turn(self, twist, left, right, skalar):
@@ -157,12 +157,8 @@ class Obstacle():
     
     def avoid(self, angle, twist, left, right):
         #de her skal testes
-        if angle < 6:
-            turn_scale = 0.7
-            drive_scale = 0.6
-        else:
-            turn_scale = 0.4
-            drive_scale = 0.8
+        turn_scale = 0.2
+        drive_scale = 0.9
 
         while angle > 0.5:
             self.drive(twist,drive_scale)
